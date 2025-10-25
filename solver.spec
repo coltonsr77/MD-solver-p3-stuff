@@ -3,7 +3,7 @@
 block_cipher = None
 
 a = Analysis(
-    ['murder_drones_viewer.py'],
+    ['solver.py'],
     pathex=[],
     binaries=[],
     datas=[
