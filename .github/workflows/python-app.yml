@@ -1,0 +1,29 @@
+name: Build
+
+on: [push]
+
+jobs:
+  Build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest]
+
+    steps:
+    - name: Obtain the latest version of the repository
+      uses: actions/checkout@v1
+    - name: Set up Python 3
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.13.x'
+    - name: Install requirements with PIP
+      run: pip install -r requirements.txt
+    - name: Install PyInstaller
+      run: pip install git+https://github.com/pyinstaller/pyinstaller.git@develop
+    - name: Build Solver
+      run: pyinstaller solver.spec
+    - name: Publish Build Artifacts
+      uses: actions/upload-artifact@master
+      with:
+        name: '${{ matrix.os }}-GUI'
+        path: dist
