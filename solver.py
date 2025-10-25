@@ -1,23 +1,11 @@
 #!/usr/bin/env python3
 """
-Murder Drones Viewer — Voice + Downloader — No metadata.json
+Murder Drones Viewer — Voice + Downloader — JPG only
 - GUI viewer for images stored in ./images/
-- TTS: pyttsx3 (system default voice chosen automatically)
-- Speech -> commands: speech_recognition (uses Google Web Speech by default)
-- Download images via scraping (requests + BeautifulSoup) from Bing image search (best-effort)
-- No metadata.json — filenames used as labels
-
-Voice commands examples:
-  - "download cyn images"
-  - "download solver images"
-  - "download cyn 8"
-  - "next" / "previous"
-  - "start slideshow" / "stop slideshow"
-  - "quit"
-
-Dependencies:
-  pip install pillow pyttsx3 SpeechRecognition requests beautifulsoup4
-  (plus PyAudio for microphone: pipwin install pyaudio on Windows, or use your distro's portaudio)
+- TTS: pyttsx3 (system default voice auto)
+- Speech -> commands: speech_recognition
+- Download images via scraping (requests + BeautifulSoup) from Bing image search
+- Only saves JPG images
 """
 import os
 import re
@@ -28,36 +16,25 @@ import threading
 import requests
 from bs4 import BeautifulSoup
 import tkinter as tk
-from tkinter import filedialog
 from PIL import Image, ImageTk, ImageSequence
 import pyttsx3
 import speech_recognition as sr
 
-# --- config ---
 IMAGES_DIR = "images"
 SLIDESHOW_INTERVAL = 3000  # ms
 DEFAULT_DOWNLOAD_COUNT = 6
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
 
-# --- voice assistant (auto voice) ---
+# --- voice assistant ---
 class VoiceAssistant:
     def __init__(self):
         try:
             self.engine = pyttsx3.init()
+            self.engine.setProperty("rate", 170)
         except Exception:
             self.engine = None
         self._lock = threading.Lock()
-        if self.engine:
-            # use system default voice (auto)
-            try:
-                voices = self.engine.getProperty('voices')
-                if voices:
-                    # don't force index; leave default
-                    pass
-                self.engine.setProperty("rate", 170)
-            except Exception:
-                pass
 
     def say(self, text):
         if not self.engine:
@@ -69,10 +46,9 @@ class VoiceAssistant:
                     self.engine.runAndWait()
                 except Exception:
                     pass
-        t = threading.Thread(target=_s, daemon=True)
-        t.start()
+        threading.Thread(target=_s, daemon=True).start()
 
-# --- image item wrapper ---
+# --- image item ---
 class ImageItem:
     def __init__(self, path):
         self.path = path
@@ -97,12 +73,8 @@ class ImageItem:
             frames.append(ImageTk.PhotoImage(img))
         return frames
 
-# --- scraping Bing image search (BeautifulSoup + fallback) ---
+# --- Bing image search ---
 def bing_image_search_urls(query, max_results=10, timeout=12):
-    """
-    Best-effort scraper for Bing Image Search.
-    Returns a list of image URLs (strings).
-    """
     q = requests.utils.requote_uri(query)
     url = f"https://www.bing.com/images/search?q={q}&qft=+filterui:imagesize-large&FORM=IRFLTR"
     headers = {"User-Agent": USER_AGENT}
@@ -111,17 +83,13 @@ def bing_image_search_urls(query, max_results=10, timeout=12):
         r.raise_for_status()
         text = r.text
         soup = BeautifulSoup(text, "html.parser")
-
         urls = []
-        # 1) look for mimg or img tags with data-src or src
         for img in soup.find_all("img"):
             src = img.get("data-src") or img.get("src") or img.get("data-thumburl")
             if src and src.startswith("http"):
                 urls.append(src)
             if len(urls) >= max_results:
                 break
-
-        # 2) attempt to find JSON blobs with "murl" fields via regex fallback
         if len(urls) < max_results:
             murl_matches = re.findall(r'"murl":"(http[^"]+)"', text)
             for m in murl_matches:
@@ -130,8 +98,6 @@ def bing_image_search_urls(query, max_results=10, timeout=12):
                     urls.append(u)
                 if len(urls) >= max_results:
                     break
-
-        # 3) clean & dedupe
         out = []
         seen = set()
         for u in urls:
@@ -145,35 +111,27 @@ def bing_image_search_urls(query, max_results=10, timeout=12):
         print("bing search error:", e)
         return []
 
+# --- download only JPG images ---
 def download_images(urls, folder, prefix="img"):
-    """
-    Download URLs into folder. Returns list of saved file paths.
-    """
     os.makedirs(folder, exist_ok=True)
     saved = []
     for i, url in enumerate(urls, start=1):
         try:
-            # attempt to pick extension
-            path_part = url.split("?")[0]
-            ext = os.path.splitext(path_part)[1]
-            if not ext or len(ext) > 5:
-                ext = ".jpg"
-            fname = f"{prefix}_{int(time.time())}_{i}{ext}"
+            fname = f"{prefix}_{int(time.time())}_{i}.jpg"
             filepath = os.path.join(folder, fname)
             headers = {"User-Agent": USER_AGENT}
             r = requests.get(url, headers=headers, timeout=12, stream=True)
             if r.status_code == 200:
-                # simple safety: check content-type
                 ctype = r.headers.get("content-type", "")
-                if "image" not in ctype and r.headers.get("Content-Length","0") == "0":
-                    print("Skipping non-image:", url)
-                    continue
-                with open(filepath, "wb") as f:
-                    for chunk in r.iter_content(8192):
-                        if chunk:
-                            f.write(chunk)
-                saved.append(filepath)
-                print("Saved", filepath)
+                if "jpeg" in ctype.lower() or "jpg" in ctype.lower():
+                    with open(filepath, "wb") as f:
+                        for chunk in r.iter_content(8192):
+                            if chunk:
+                                f.write(chunk)
+                    saved.append(filepath)
+                    print("Saved JPG:", filepath)
+                else:
+                    print("Skipped non-JPG:", url)
             else:
                 print("Bad status", r.status_code, url)
         except Exception as e:
@@ -197,7 +155,6 @@ class SpeechWorker(threading.Thread):
         if not self.mic:
             self.voice.say("Microphone not available. Voice commands disabled.")
             return
-        # calibrate ambient noise briefly
         with self.mic as source:
             try:
                 self.recognizer.adjust_for_ambient_noise(source, duration=1.0)
@@ -213,7 +170,6 @@ class SpeechWorker(threading.Thread):
                 print("Recognized:", text)
                 self.q.put(text)
             except sr.UnknownValueError:
-                # nothing understandable — continue listening
                 continue
             except Exception as e:
                 print("Speech error:", e)
@@ -223,9 +179,8 @@ class SpeechWorker(threading.Thread):
 class ViewerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Murder Drones Viewer — Voice Downloader (no metadata)")
+        self.root.title("Murder Drones Viewer — JPG Only")
         self.root.geometry("1000x650")
-
         self.voice = VoiceAssistant()
         self.command_q = queue.Queue()
         self.speech_worker = SpeechWorker(self.command_q, self.voice)
@@ -251,7 +206,7 @@ class ViewerApp:
         if not os.path.isdir(IMAGES_DIR):
             os.makedirs(IMAGES_DIR, exist_ok=True)
         files = []
-        for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp"):
+        for ext in ("*.jpg", "*.jpeg"):
             files.extend(glob.glob(os.path.join(IMAGES_DIR, ext)))
         files.sort()
         self.images = [ImageItem(p) for p in files]
@@ -261,51 +216,23 @@ class ViewerApp:
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         right = tk.Frame(self.root, width=300)
         right.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.canvas = tk.Label(left, text="No images yet — say 'download cyn images' or click the Download buttons", anchor="center", justify="center")
+        self.canvas = tk.Label(left, text="No images yet — say 'download cyn images' or click Download", anchor="center", justify="center")
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-
         ctrl = tk.Frame(left)
         ctrl.pack(fill=tk.X, padx=8, pady=(0,8))
         tk.Button(ctrl, text="◀ Prev", command=self.prev_image).pack(side=tk.LEFT)
         tk.Button(ctrl, text="Next ▶", command=self.next_image).pack(side=tk.LEFT, padx=6)
         self.btn_slideshow = tk.Button(ctrl, text="Play ▶", command=self.toggle_slideshow)
         self.btn_slideshow.pack(side=tk.LEFT, padx=6)
-
         tk.Button(ctrl, text="Download Cyn", command=lambda: threading.Thread(target=self.download_and_reload, args=("Cyn murder drones", DEFAULT_DOWNLOAD_COUNT), daemon=True).start()).pack(side=tk.RIGHT, padx=4)
         tk.Button(ctrl, text="Download Solver", command=lambda: threading.Thread(target=self.download_and_reload, args=("Solver murder drones", DEFAULT_DOWNLOAD_COUNT), daemon=True).start()).pack(side=tk.RIGHT)
-
         tk.Label(right, text="Info", font=("Segoe UI", 12, "bold")).pack(anchor="nw", padx=8, pady=(8,0))
         self.info_name = tk.Label(right, text="", font=("Segoe UI", 11, "bold"), wraplength=280, justify="left")
         self.info_name.pack(anchor="nw", padx=8, pady=(4,0))
         self.info_desc = tk.Label(right, text="", wraplength=280, justify="left")
         self.info_desc.pack(anchor="nw", padx=8)
-
-        tk.Label(right, text="Voice Commands", font=("Segoe UI", 10, "bold")).pack(anchor="nw", padx=8, pady=(10,2))
-        tk.Label(right, text="Try: 'download cyn images', 'download solver', 'next', 'previous', 'start slideshow', 'stop slideshow', 'quit'").pack(anchor="nw", padx=8)
-
         self.status = tk.Label(self.root, text="", bd=1, relief=tk.SUNKEN, anchor="w")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
-
-        # clicking image opens file in a new window at native size
-        self.canvas.bind("<Button-1>", lambda e: self._open_native())
-
-    def _open_native(self):
-        if not self.images:
-            return
-        path = self.images[self.index].path
-        try:
-            img = Image.open(path)
-        except Exception:
-            return
-        w, h = img.size
-        top = tk.Toplevel(self.root)
-        top.title(os.path.basename(path))
-        lbl = tk.Label(top)
-        lbl.pack()
-        photo = ImageTk.PhotoImage(img)
-        lbl.img = photo
-        lbl.config(image=photo)
 
     def _show_image(self, idx):
         if not self.images:
@@ -328,11 +255,9 @@ class ViewerApp:
         self.canvas.config(image=frames[0])
         self.canvas.image = frames[0]
         self.status.config(text=f"{self.index+1}/{len(self.images)} — {os.path.basename(item.path)}")
-        # show filename as name/desc fallback
-        name = os.path.basename(item.path)
-        self.info_name.config(text=name)
+        self.info_name.config(text=os.path.basename(item.path))
         self.info_desc.config(text="")
-        self.voice.say(f"Now showing {name}")
+        self.voice.say(f"Now showing {os.path.basename(item.path)}")
         if item._is_animated and len(frames) > 1:
             self._animate_gif()
 
@@ -397,19 +322,16 @@ class ViewerApp:
             self.slideshow_job = None
 
     def download_and_reload(self, query, count=DEFAULT_DOWNLOAD_COUNT):
-        """
-        Background downloader: search, download, then reload images.
-        """
         self.voice.say(f"Searching for {query}")
         self.status.config(text=f"Searching for '{query}'...")
-        urls = bing_image_search_urls(query, max_results=count)
+        urls = bing_image_search_urls(query, max_results=count*2)
         if not urls:
             self.voice.say("Search returned no results.")
             self.status.config(text="No results.")
             return
-        self.status.config(text=f"Downloading {len(urls)} images...")
+        self.status.config(text=f"Downloading JPG images...")
         saved = download_images(urls, IMAGES_DIR, prefix=query.replace(" ", "_"))
-        self.status.config(text=f"Downloaded {len(saved)} images.")
+        self.status.config(text=f"Downloaded {len(saved)} JPG images.")
         if saved:
             self.voice.say(f"Downloaded {len(saved)} images for {query}. Reloading images.")
             self.root.after(200, self._reload_images)
@@ -425,27 +347,22 @@ class ViewerApp:
         while not self.command_q.empty():
             cmd = self.command_q.get_nowait()
             print("CMD:", cmd)
-            # parse download commands: "download <term> [n]"
             if cmd.startswith("download"):
                 parts = cmd.split()
-                if len(parts) >= 2:
-                    # if second token is 'cyn' or 'solver', keep it
-                    term = " ".join(parts[1:])
-                else:
-                    term = "cyn murder drones"
+                term = " ".join(parts[1:]) if len(parts) >= 2 else "cyn murder drones"
                 count = DEFAULT_DOWNLOAD_COUNT
                 if parts and parts[-1].isdigit():
                     count = int(parts[-1])
                 threading.Thread(target=self.download_and_reload, args=(term, count), daemon=True).start()
-            elif cmd in ("next", "show next", "next image"):
+            elif cmd in ("next", "next image"):
                 self.next_image()
-            elif cmd in ("previous", "prev", "show previous"):
+            elif cmd in ("previous", "prev"):
                 self.prev_image()
-            elif cmd in ("start slideshow", "play slideshow", "start"):
+            elif cmd in ("start slideshow", "play slideshow"):
                 self._start_slideshow()
             elif cmd in ("stop slideshow", "stop"):
                 self._stop_slideshow()
-            elif cmd in ("quit", "exit", "close"):
+            elif cmd in ("quit", "exit"):
                 self.voice.say("Goodbye")
                 self.root.quit()
             else:
