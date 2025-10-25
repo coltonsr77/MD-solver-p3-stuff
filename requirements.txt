@@ -1,0 +1,6 @@
+pillow
+pyttsx3 
+SpeechRecognition 
+requests
+pipwin
+pyaudio
