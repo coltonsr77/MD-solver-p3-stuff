@@ -4,3 +4,4 @@ SpeechRecognition
 requests
 pipwin
 pyaudio
+beautifulsoup4
