@@ -7,20 +7,20 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('images', 'images'),          # include the images folder
-        ('metadata.json', '.'),        # include metadata.json in root
+        ('images/*', 'images'),   # include downloaded images
     ],
     hiddenimports=[
-        'PIL._tkinter_finder',         # ensures Pillow + Tkinter support
-        'PIL.Image', 'PIL.ImageTk', 'PIL.ImageSequence'
+        'pyttsx3.drivers', 
+        'pyttsx3.drivers.sapi5', 
+        'speech_recognition',
+        'requests',
+        'bs4',
+        'PIL'
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
@@ -36,8 +36,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,          # Hide console window
-    icon=None,              # You can add an .ico later (e.g., 'md_icon.ico')
+    console=False,  # change to True for console debugging
+    icon=None,      # you can add an icon later, e.g., "icon.ico"
 )
 
 coll = COLLECT(
@@ -47,5 +47,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    name='MurderDronesViewer'
+    upx_exclude=[],
+    name='MurderDronesViewer',
 )
